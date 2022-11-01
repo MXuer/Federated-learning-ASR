@@ -11,7 +11,7 @@
 
 # Set this to somewhere where you want to put your data, or where
 # someone else has already put it. You'll want to change this.
-data=/home/<user>/data/kaldi/librispeech
+data=/data3/Librispeech
 
 # base url for downloads.
 data_url=www.openslr.org/resources/12
@@ -20,10 +20,13 @@ mfccdir=mfcc
 
 # train "whole" first, then pretrain, since we need some files in the second training
 set=whole # pretrain or whole ?
-stage=1
+###
+# whole和pretrain的mfcc特征都要先提取出来
+###
+stage=6
 
 # adapt to your machine
-nj=24
+nj=60
 
 . ./cmd.sh
 . ./path.sh
@@ -117,17 +120,25 @@ echo "#    Feature Extraction          #"
 echo "##################################"
 
 if [ $stage -le 6 ]; then
-  for part in `ls data/${set}`; do
+  for part in `ls data/whole`; do
     echo "Extracting mfcc and cmvn stats of pretrain set (${part})..."
     #sorting files
-    utils/fix_data_dir.sh data/${set}/${part}    
-    utils/utt2spk_to_spk2utt.pl data/${set}/${part}/utt2spk > data/${set}/${part}/spk2utt
-    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj data/${set}/${part} exp/make_mfcc/${set}/${part} $mfccdir/${set}/${part}
-    steps/compute_cmvn_stats.sh data/${set}/${part} exp/make_mfcc/${set}/${part} $mfccdir/${set}/${part}
+    utils/fix_data_dir.sh data/whole/${part}    
+    utils/utt2spk_to_spk2utt.pl data/whole/${part}/utt2spk > data/whole/${part}/spk2utt
+    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj data/whole/${part} exp/make_mfcc/whole/${part} $mfccdir/whole/${part}
+    steps/compute_cmvn_stats.sh data/whole/${part} exp/make_mfcc/whole/${part} $mfccdir/whole/${part}
+  done
+  
+  for part in `ls data/pretrain`; do
+    echo "Extracting mfcc and cmvn stats of pretrain set (${part})..."
+    #sorting files
+    utils/fix_data_dir.sh data/pretrain/${part}    
+    utils/utt2spk_to_spk2utt.pl data/pretrain/${part}/utt2spk > data/pretrain/${part}/spk2utt
+    steps/make_mfcc.sh --cmd "$train_cmd" --nj $nj data/pretrain/${part} exp/make_mfcc/pretrain/${part} $mfccdir/pretrain/${part}
+    steps/compute_cmvn_stats.sh data/pretrain/${part} exp/make_mfcc/pretrain/${part} $mfccdir/pretrain/${part}
   done
 fi
-
-
+exit 1;
 ## GMM Training on pretrain-set
 
 if [ $stage -le 7 ]; then
@@ -250,7 +261,7 @@ if [ "${set}" == "whole" ]; then
     if [ $stage -le 17 ]; then
         echo "scoring whole test with whole model..."
         cd ../pytorch-kaldi-fl
-        local/score.sh --cmd run.pl data/pretrain/test exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/test exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_test_out_dnn1
     fi
     if [ $stage -le 18 ]; then
         echo "decoding pretrain transfer test with whole model..."
@@ -263,8 +274,8 @@ if [ "${set}" == "whole" ]; then
     if [ $stage -le 19 ]; then
         echo "scoring pretrain test with whole model..."
         cd ../pytorch-kaldi-fl
-        local/score.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_transfer_test_out_dnn1
-        local/score.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_transfer_fl_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_transfer_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/whole/tri3/graph ../pytorch-kaldi/exp/fl/whole_mlp_mfcc_prod/decode_whole_transfer_fl_test_out_dnn1
     fi
     exit
 fi
@@ -285,7 +296,6 @@ if [ $stage -le 15 ]; then
   done
 fi
 
-
 if [ $stage -le 16 ]; then
   echo ""
 fi
@@ -303,37 +313,33 @@ fi
 if [ $stage -le 18 ]; then
     echo "Training on the FL set"
     cd ../pytorch-kaldi
-    for ck in 4 16 8 2; do
-        
-        while ! [ -f exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc/exp_files/final_architecture1.pkl ]; do
-            echo "exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc/exp_files/final_architecture1.pkl"
-            for spk in `ls ../pytorch-kaldi-fl/data/FL | sort -n` ; do #
-                if [ "${spk}" -ne "3559" ]; then
-                   mkdir -p exp/fl/ck${ck}/clients
-                   # if this crashes on the first try (depends on the system) 
-                   # you need to generate this file by hand and restart this stage:
-                   # echo "0" > exp/fl/ck${ck}/clients/last_spk
-                   touch exp/fl/ck${ck}/clients/last_spk
-                   lspk=$(cat exp/fl/ck${ck}/clients/last_spk)
-                   if [ "${spk}" -gt "$lspk" ]; then
-                   #mkdir -p exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc
-                   until python run_exp_fl.py cfg/fl/${ck}/fl_${spk}_mlp_mfcc.cfg
-                   do
-                      echo "some error occured in spk ${spk}... retrying " >> main.log
-                      sleep 1
-                   done
-                    echo "${spk}" > exp/fl/ck${ck}/clients/last_spk
-                   fi
-                fi
-            done
-            
-            echo "0" > exp/fl/ck${ck}/clients/last_spk
-            #wait
-            # average here
-            cd ../pytorch-kaldi-fl
-            python local/weighted_avg.py ../pytorch-kaldi/exp/fl/ck${ck} data/FL
-            cd ../pytorch-kaldi
-        done
+    for ck in 2 4 8 16; do
+      for spk in `ls ../pytorch-kaldi-fl/data/FL | sort -n` ; do #
+          if [ "${spk}" -ne "3559" ]; then
+              mkdir -p exp/fl/ck${ck}/clients
+              # if this crashes on the first try (depends on the system) 
+              # you need to generate this file by hand and restart this stage:
+            #  echo "0" > exp/fl/ck${ck}/clients/last_spk
+              touch exp/fl/ck${ck}/clients/last_spk
+              lspk=$(cat exp/fl/ck${ck}/clients/last_spk)
+              if [ "${spk}" -gt "$lspk" ]; then
+                #mkdir -p exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc
+                until python run_exp_fl.py cfg/fl/${ck}/fl_${spk}_mlp_mfcc.cfg
+                do
+                    echo "some error occured in spk ${spk}... retrying " >> main.log
+                    sleep 1
+                done
+                echo "${spk}" > exp/fl/ck${ck}/clients/last_spk
+              fi
+          fi
+      done
+      
+      echo "0" > exp/fl/ck${ck}/clients/last_spk
+      #wait
+      # average here
+      cd ../pytorch-kaldi-fl
+      python local/weighted_avg.py ../pytorch-kaldi/exp/fl/ck${ck} data/FL
+      cd ../pytorch-kaldi
     done
 
 fi
@@ -358,7 +364,7 @@ fi
 if [ $stage -le 21 ]; then
     echo "scoring pretrain test with pretrain model..."
     cd ../pytorch-kaldi-fl
-    local/score.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_test_out_dnn1
+    local/score_wer.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_test_out_dnn1
 fi
 
 if [ $stage -le 22 ]; then
@@ -372,8 +378,8 @@ fi
 if [ $stage -le 23 ]; then
     echo "scoring pretrain test with pretrain model..."
     cd ../pytorch-kaldi-fl
-    local/score.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
-    local/score.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_transfer_fl_test_out_dnn1
+    local/score_wer.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
+    local/score_wer.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/pretrain_mlp_mfcc_prod/decode_pretrain_transfer_fl_test_out_dnn1
 fi
 
 if [ $stage -le 24 ]; then
@@ -397,15 +403,15 @@ if [ $stage -le 25 ]; then
     for ck in 2 4 8 16; do
 
         cd ../pytorch-kaldi-fl
-        local/score.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_test_out_dnn1
-        local/score.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
-        local/score.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_transfer_fl_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/transfer_pre_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
+        local/score_wer.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/fl/fl_${ck}_mlp_mfcc_prod/decode_pretrain_transfer_fl_test_out_dnn1
     done
 fi
 
 if [ $stage -le 26 ]; then
     echo "(whole) generate training counts for normalization..."
-    alidir=../pytorch-kaldi-whole/exp/whole/tri3_ali
+    alidir=exp/whole/tri3_ali
     num_pdf=$(hmm-info $alidir/final.mdl | awk '/pdfs/{print $4}')
     labels_tr_pdf="ark:ali-to-pdf $alidir/final.mdl \"ark:gunzip -c $alidir/ali.*.gz |\" ark:- |"
     analyze-counts --verbose=1 --binary=false --counts-dim=$num_pdf "$labels_tr_pdf" ${alidir}/ali_train_pdf.counts
@@ -415,16 +421,16 @@ if [ $stage -le 27 ]; then
     echo "decoding pretrain test with whole model..."
     cd ../pytorch-kaldi
     mkdir -p exp/whole/mlp_mfcc_prod/exp_files/
-    cp exp/whole/mlp_mfcc/exp_files/final_architecture1.pkl exp/whole/mlp_mfcc_prod/exp_files/final_architecture1.pkl
+    cp exp/fl/whole_mlp_mfcc/exp_files/final_architecture1.pkl exp/whole/mlp_mfcc_prod/exp_files/final_architecture1.pkl
     
-    cp ../pytorch-kaldi-whole/exp/whole/tri3/final.mdl ../pytorch-kaldi-whole/exp/whole/tri3/graph/final.mdl
+    cp ../pytorch-kaldi-fl/exp/whole/tri3/final.mdl ../pytorch-kaldi-fl/exp/whole/tri3/graph/final.mdl
     python run_exp.py cfg/whole/mlp_mfcc_prod.cfg
 fi
 
 if [ $stage -le 28 ]; then
     echo "scoring pretrain test with whole model..."
     cd ../pytorch-kaldi-fl
-    local/score.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/whole/mlp_mfcc_prod/decode_pretrain_test_out_dnn1
+    local/score_wer.sh --cmd run.pl data/pretrain/test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/whole/mlp_mfcc_prod/decode_pretrain_test_out_dnn1
 fi
 
 if [ $stage -le 29 ]; then
@@ -434,8 +440,8 @@ if [ $stage -le 29 ]; then
 fi
 
 if [ $stage -le 30 ]; then
-    echo "scoring pretrain test with whole model..."
+    echo "scoring pretrain transfer test with whole model..."
     cd ../pytorch-kaldi-fl
-    local/score.sh --cmd run.pl data/pretrain/transfer_test exp/pretrain/tri3/graph ../pytorch-kaldi/exp/whole/mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
+    local/score_wer.sh --cmd run.pl data/pretrain/transfer_fl_test_org exp/pretrain/tri3/graph ../pytorch-kaldi/exp/whole/mlp_mfcc_prod/decode_pretrain_transfer_test_out_dnn1
 fi
 
