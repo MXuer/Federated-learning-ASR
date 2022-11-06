@@ -23,7 +23,7 @@ set=pretrain # pretrain or whole ?
 ###
 # whole和pretrain的mfcc特征都要先提取出来
 ###
-stage=7
+stage=1
 
 # adapt to your machine
 nj=30
