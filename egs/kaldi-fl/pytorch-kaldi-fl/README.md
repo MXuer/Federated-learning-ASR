@@ -10,12 +10,11 @@ To run the script execute the ```run.sh``` file.
 export KALDI_ROOT=/home/<user>/kaldi
 ```
 
-2. 创建软链接
+2. 下载一些`librispeech`语言模型相关的一些[文件](http://openslr.magicdatatech.com/resources/11/)；
 
 ```shell
-ln -s <KALDI_ROOT>/egs/wsj/s5/rnnlm .
-ln -s <KALDI_ROOT>/egs/wsj/s5/steps .
-ln -s <KALDI_ROOT>/egs/wsj/s5/utils .
+cd Federated-learning-ASR/egs/kaldi-fl/pytorch-kaldi-fl
+mkdir data/local/lm
 ```
 
 3. 执行 `run.sh`

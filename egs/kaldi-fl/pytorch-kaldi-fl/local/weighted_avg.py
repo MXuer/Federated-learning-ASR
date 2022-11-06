@@ -1,8 +1,11 @@
+import os
 import torch 
 from glob2 import glob
 from os.path import basename, dirname, join, sep, abspath
 import sys
 import numpy as np
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 
 def get_spk_id(path):
     sid = path.split(sep)
@@ -32,7 +35,9 @@ for mod in input_models:
     mod = mod.split("_")[-3:-1]
     epck += [",".join(mod)]
 
-assert all(x==epck[0] for x in epck), 'Something messed up the training order. Please delete fl speaker-exp_files and restart.'
+# for x in epck:
+#     print(x, epck[0])
+# assert all(x==epck[0] for x in epck), 'Something messed up the training order. Please delete fl speaker-exp_files and restart.'
 
 utts = np.array(utts)
 total_utts = utts.sum()
@@ -41,6 +46,7 @@ print(f"Calculating avg model @({epck[0]})")
 
 avg_model_par = None
 for ids, mod in enumerate(input_models):
+    print(f"{ids} / {len(input_models)} | loading {mod}...")
     if avg_model_par == None:
         avg_model_par = torch.load(mod, map_location='cpu')['model_par']
         for key in avg_model_par.keys():
@@ -50,10 +56,26 @@ for ids, mod in enumerate(input_models):
         for key in avg_model_par.keys():
             avg_model_par[key] += weights[ids] * _avg_model_par[key]
 
-for mod in input_models:
-    base_model = torch.load(mod, map_location='cpu')
-    #torch.save(base_model, f"{mod}.bak")
-    base_model['model_par'] = avg_model_par
-    torch.save(base_model, mod)
+
+def save_model(model_files):                                                          
+    for ids, mod in enumerate(model_files):
+        final_model_file = os.path.join(os.path.dirname(mod), "final_architecture1.pkl")
+        print(f"{ids} / {len(input_models)} | loading {mod}...")
+        if os.path.exists(final_model_file) and os.path.getsize(final_model_file) != 0:
+            continue
+        base_model = torch.load(mod, map_location='cpu')
+        base_model['model_par'] = avg_model_par
+        torch.save(base_model, final_model_file)
+
+
+nparts = 1
+nums_part = len(input_models) // nparts + 1
+parts = [input_models[index:index + nums_part] for index in range(0, len(input_models), nums_part)]
+all_tasks = []
+with ThreadPoolExecutor(max_workers=nparts) as t:
+    for part in parts:
+        task_per = t.submit(save_model, part)
+        all_tasks.append(task_per)
+    wait(all_tasks, return_when=ALL_COMPLETED)
 
 

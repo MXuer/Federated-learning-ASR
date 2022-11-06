@@ -19,14 +19,14 @@ lm_url=www.openslr.org/resources/11
 mfccdir=mfcc
 
 # train "whole" first, then pretrain, since we need some files in the second training
-set=whole # pretrain or whole ?
+set=pretrain # pretrain or whole ?
 ###
 # whole和pretrain的mfcc特征都要先提取出来
 ###
-stage=6
+stage=7
 
 # adapt to your machine
-nj=60
+nj=30
 
 . ./cmd.sh
 . ./path.sh
@@ -138,7 +138,7 @@ if [ $stage -le 6 ]; then
     steps/compute_cmvn_stats.sh data/pretrain/${part} exp/make_mfcc/pretrain/${part} $mfccdir/pretrain/${part}
   done
 fi
-exit 1;
+
 ## GMM Training on pretrain-set
 
 if [ $stage -le 7 ]; then
@@ -310,39 +310,39 @@ if [ $stage -le 17 ]; then
     done
 fi
 
-if [ $stage -le 18 ]; then
-    echo "Training on the FL set"
-    cd ../pytorch-kaldi
-    for ck in 2 4 8 16; do
-      for spk in `ls ../pytorch-kaldi-fl/data/FL | sort -n` ; do #
-          if [ "${spk}" -ne "3559" ]; then
-              mkdir -p exp/fl/ck${ck}/clients
-              # if this crashes on the first try (depends on the system) 
-              # you need to generate this file by hand and restart this stage:
-            #  echo "0" > exp/fl/ck${ck}/clients/last_spk
-              touch exp/fl/ck${ck}/clients/last_spk
-              lspk=$(cat exp/fl/ck${ck}/clients/last_spk)
-              if [ "${spk}" -gt "$lspk" ]; then
-                #mkdir -p exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc
-                until python run_exp_fl.py cfg/fl/${ck}/fl_${spk}_mlp_mfcc.cfg
-                do
-                    echo "some error occured in spk ${spk}... retrying " >> main.log
-                    sleep 1
-                done
-                echo "${spk}" > exp/fl/ck${ck}/clients/last_spk
-              fi
-          fi
-      done
-      
-      echo "0" > exp/fl/ck${ck}/clients/last_spk
-      #wait
-      # average here
-      cd ../pytorch-kaldi-fl
-      python local/weighted_avg.py ../pytorch-kaldi/exp/fl/ck${ck} data/FL
+  if [ $stage -le 18 ]; then
+      echo "Training on the FL set"
       cd ../pytorch-kaldi
-    done
+      for ck in 2 4 8 16; do
+        for spk in `ls ../pytorch-kaldi-fl/data/FL | sort -n` ; do #
+            if [ "${spk}" -ne "3559" ]; then
+                mkdir -p exp/fl/ck${ck}/clients
+                # if this crashes on the first try (depends on the system) 
+                # you need to generate this file by hand and restart this stage:
+              #  echo "0" > exp/fl/ck${ck}/clients/last_spk
+                touch exp/fl/ck${ck}/clients/last_spk
+                lspk=$(cat exp/fl/ck${ck}/clients/last_spk)
+                if [ "${spk}" -gt "$lspk" ]; then
+                  #mkdir -p exp/fl/ck${ck}/clients/fl_${spk}_mlp_mfcc
+                  until python run_exp_fl.py cfg/fl/${ck}/fl_${spk}_mlp_mfcc.cfg
+                  do
+                      echo "some error occured in spk ${spk}... retrying " >> main.log
+                      sleep 1
+                  done
+                  echo "${spk}" > exp/fl/ck${ck}/clients/last_spk
+                fi
+            fi
+        done
+        
+        echo "0" > exp/fl/ck${ck}/clients/last_spk
+        #wait
+        # average here
+        cd ../pytorch-kaldi-fl
+        python local/weighted_avg.py ../pytorch-kaldi/exp/fl/ck${ck} data/FL
+        cd ../pytorch-kaldi
+      done
 
-fi
+  fi
 
 if [ $stage -le 19 ]; then
     echo "generate training counts for normalization..."

@@ -1,5 +1,5 @@
 # You should change the KALDI_ROOT according to your setup!
-export KALDI_ROOT=/home/<user>/kaldi
+export KALDI_ROOT=/data/kaldi/20200417_kaldi/kaldi-master
 
 # This is necessary if there is no hard copy of the wsj scripts
 # generate missing symlinks, since we are not neccessarily in $KALDI_ROOT/egs
